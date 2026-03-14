@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coil Combiner – Group Summary with charts</title>
+    <!-- Bootstrap 5 -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Chart.js for simple graphics -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+    <style>
+        body { background: #eef2f7; }
+        .left-panel, .center-panel, .right-panel {
+            background: white; border-radius: 16px; box-shadow: 0 6px 14px rgba(0,0,0,0.04);
+            padding: 1.2rem; height: calc(100vh - 150px); overflow-y: auto;
+        }
+        .mother-item {
+            background: #f8fafd; border-left: 5px solid #0d6efd; padding: 0.75rem 1rem; margin-bottom: 0.5rem;
+            border-radius: 10px; cursor: pointer; transition: 0.15s; font-weight: 500;
+        }
+        .mother-item:hover { background: #e2eafc; transform: translateX(2px); }
+        .mother-item.active { background: #cfe2ff; border-left-color: #0a58ca; }
+        .partition-row {
+            background: #f9fbfd; border-radius: 12px; padding: 0.75rem; margin-bottom: 0.75rem;
+            border: 1px solid #dee2e6;
+        }
+        .slit-minibar {
+            display: flex; height: 24px; width: 100%; border-radius: 6px; overflow: hidden; border: 1px solid #aaa;
+        }
+        .slit-segment-good { background-color: #0d6efd; }
+        .slit-segment-scrap { background-color: #dc3545; }
+        .order-summary-row {
+            background: #f1f5f9; border-radius: 10px; padding: 0.5rem 0.8rem; margin-bottom: 0.5rem;
+            border-left: 4px solid #198754; cursor: pointer;
+        }
+        .order-summary-row:hover { background: #e2eafc; }
+        .order-summary-row.active { background: #cfe2ff; border-left-color: #0a58ca; }
+        .yield-bar { height: 8px; width: 100%; background: #dee2e6; border-radius: 20px; overflow: hidden; }
+        .yield-fill { height: 100%; background: #198754; width: 0%; }
+        .stats-badge {
+            background: #e9ecef; border-radius: 20px; padding: 0.2rem 0.8rem; font-size: 0.8rem;
+        }
+        .svg-container { background: #f0f2f5; border-radius: 12px; padding: 1rem; text-align: center; overflow-x: auto; }
+        #coilSvg { max-width: 100%; height: auto; background: white; border-radius: 8px; }
+        .nav-tabs { background: white; border-radius: 30px; padding: 0.3rem; box-shadow: 0 2px 8px rgba(0,0,0,0.03); }
+        .nav-link { border-radius: 30px; color: #495057; }
+        .nav-link.active { background-color: #0d6efd; color: white; }
+        .small-table { font-size: 0.8rem; }
+        .group-table th { position: sticky; top: 0; background: white; }
+        .chart-container { background: white; border-radius: 16px; padding: 1rem; margin-bottom: 1.5rem; }
+    </style>
+</head>
+<body>
+    <div class="container-fluid py-3">
+        <!-- file input -->
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="card shadow-sm p-3">
+                    <div class="d-flex align-items-center gap-3">
+                        <label class="fw-bold mb-0">📁 CoilCombiner_Output.xlsx</label>
+                        <input type="file" class="form-control w-25" id="fileInput" accept=".xlsx,.xls">
+                        <span id="fileStatus" class="text-muted small">no file</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- tabs -->
+        <ul class="nav nav-tabs mb-3" id="mainTabs" role="tablist" style="display: none;">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="coil-tab" data-bs-toggle="tab" data-bs-target="#coilView" type="button" role="tab">🔩 Coil View</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="order-tab" data-bs-toggle="tab" data-bs-target="#orderView" type="button" role="tab">📋 Order View</button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="group-tab" data-bs-toggle="tab" data-bs-target="#groupView" type="button" role="tab">📊 Group Summary</button>
+            </li>
+        </ul>
+
+        <div class="tab-content" id="mainTabContent" style="display: none;">
+            <!-- COIL VIEW (unchanged) -->
+            <div class="tab-pane fade show active" id="coilView" role="tabpanel">
+                <div class="row g-3">
+                    <div class="col-lg-3">
+                        <div class="left-panel">
+                            <h5 class="mb-3">🔩 Mother coils</h5>
+                            <div id="motherList" class="list-container"></div>
+                            <div class="text-muted small mt-2" id="motherCount"></div>
+                        </div>
+                    </div>
+                    <div class="col-lg-5">
+                        <div class="center-panel">
+                            <div id="motherSummary" class="mb-2 small bg-light p-2 rounded"></div>
+                            <div class="card border-0 bg-light mb-3">
+                                <div class="card-body p-3">
+                                    <h6 class="card-title mb-2">📋 Order summary (from this mother coil)</h6>
+                                    <div id="orderSummaryContainer" class="small"></div>
+                                    <hr class="my-2">
+                                    <div class="d-flex justify-content-between fw-bold">
+                                        <span>Total allocated:</span>
+                                        <span id="totalAllocatedOrders">0 kg</span>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <h6 class="mb-1">🧾 Child coils & allocation</h6>
+                                <span id="childCount" class="badge bg-secondary">0</span>
+                            </div>
+                            <div id="childAllocationGrid" class="mt-2"></div>
+                        </div>
+                    </div>
+                    <div class="col-lg-4">
+                        <div class="right-panel">
+                            <h6 class="mb-2">✂️ Mother coil cutting pattern</h6>
+                            <div class="svg-container" id="svgContainer">
+                                <svg id="coilSvg" viewBox="0 0 500 400" style="width:100%;"></svg>
+                            </div>
+                            <div class="mt-3 d-flex justify-content-between stats-badge">
+                                <span>📊 yield: <span id="yieldPct">-</span></span>
+                                <span>🗑️ scrap: <span id="scrapEst">-</span></span>
+                            </div>
+                            <div class="small text-muted mt-2" id="stockDim"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ORDER VIEW (unchanged) -->
+            <div class="tab-pane fade" id="orderView" role="tabpanel">
+                <div class="row g-3">
+                    <div class="col-lg-4">
+                        <div class="left-panel">
+                            <h5 class="mb-3">📦 All orders (by line)</h5>
+                            <div id="orderListContainer" class="list-container" style="max-height: 70vh; overflow-y: auto;"></div>
+                            <div class="text-muted small mt-2" id="orderCount"></div>
+                        </div>
+                    </div>
+                    <div class="col-lg-8">
+                        <div class="right-panel">
+                            <h6 id="selectedOrderTitle" class="mb-3">Select an order from the list</h6>
+                            <div id="orderDetailContainer"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- GROUP SUMMARY TAB with charts -->
+            <div class="tab-pane fade" id="groupView" role="tabpanel">
+                <div class="row">
+                    <div class="col-12">
+                        <div class="chart-container">
+                            <div class="row">
+                                <div class="col-md-6">
+                                    <canvas id="allocChart" width="400" height="200"></canvas>
+                                </div>
+                                <div class="col-md-6">
+                                    <canvas id="yieldChart" width="400" height="200"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card shadow-sm p-3">
+                            <h5 class="mb-3">📊 Group summary (by GROUP_ID)</h5>
+                            <div style="max-height: 400px; overflow-y: auto;">
+                                <table class="table table-sm table-bordered table-hover small-table">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Group ID</th>
+                                            <th>Orders (lines)</th>
+                                            <th>Mother coils</th>
+                                            <th>Total allocated (kg)</th>
+                                            <th>Est. scrap (kg)</th>
+                                            <th>Yield %</th>
+                                            <th>Order grades</th>
+                                            <th>Order thicknesses</th>
+                                            <th>Order widths</th>
+                                            <th>Mother grades</th>
+                                            <th>Mother thicknesses</th>
+                                            <th>Mother stock widths</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="groupSummaryBody"></tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- message area -->
+        <div id="messageArea" class="mt-2"></div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        (function(){
+            // data
+            let orderMapping = [];
+            let slitSeq = [];
+            let motherSet = new Set();
+            let currentMother = null;
+            let ordersAggregated = new Map(); // for order view
+
+            // Chart instances
+            let allocChartInst = null;
+            let yieldChartInst = null;
+
+            // DOM elements
+            const fileInput = document.getElementById('fileInput');
+            const fileStatus = document.getElementById('fileStatus');
+            const mainTabs = document.getElementById('mainTabs');
+            const mainTabContent = document.getElementById('mainTabContent');
+            const motherListDiv = document.getElementById('motherList');
+            const motherCountSpan = document.getElementById('motherCount');
+            const motherSummary = document.getElementById('motherSummary');
+            const orderSummaryContainer = document.getElementById('orderSummaryContainer');
+            const totalAllocatedOrders = document.getElementById('totalAllocatedOrders');
+            const childAllocationGrid = document.getElementById('childAllocationGrid');
+            const childCountSpan = document.getElementById('childCount');
+            const coilSvg = document.getElementById('coilSvg');
+            const yieldPct = document.getElementById('yieldPct');
+            const scrapEst = document.getElementById('scrapEst');
+            const stockDim = document.getElementById('stockDim');
+            const messageArea = document.getElementById('messageArea');
+
+            // order view elements
+            const orderListContainer = document.getElementById('orderListContainer');
+            const orderCountSpan = document.getElementById('orderCount');
+            const selectedOrderTitle = document.getElementById('selectedOrderTitle');
+            const orderDetailContainer = document.getElementById('orderDetailContainer');
+
+            // group summary body & chart canvases
+            const groupSummaryBody = document.getElementById('groupSummaryBody');
+            const allocCanvas = document.getElementById('allocChart');
+            const yieldCanvas = document.getElementById('yieldChart');
+
+            // Helper
+            function fmt(n, d=2) { if (n==null) return ''; let v=parseFloat(n); return isNaN(v)? n : v.toFixed(d); }
+
+            function showMessage(txt, type='info') {
+                messageArea.innerHTML = `<div class="alert alert-${type} alert-dismissible fade show">${txt}<button type="button" class="btn-close" data-bs-dismiss="alert"></button></div>`;
+            }
+
+            function clearAll() {
+                mainTabs.style.display = 'none';
+                mainTabContent.style.display = 'none';
+                motherListDiv.innerHTML = '';
+                motherCountSpan.innerText = '';
+                orderSummaryContainer.innerHTML = '';
+                totalAllocatedOrders.innerText = '0 kg';
+                childAllocationGrid.innerHTML = '';
+                coilSvg.innerHTML = '';
+                yieldPct.innerText = scrapEst.innerText = stockDim.innerText = '-';
+                orderListContainer.innerHTML = '';
+                orderCountSpan.innerText = '';
+                orderDetailContainer.innerHTML = '';
+                groupSummaryBody.innerHTML = '';
+                if (allocChartInst) allocChartInst.destroy();
+                if (yieldChartInst) yieldChartInst.destroy();
+            }
+
+            // parse file
+            function handleFile(file) {
+                clearAll();
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const wb = XLSX.read(data, { type: 'array' });
+                        const mappingSheet = wb.Sheets['OrderCoilMapping'];
+                        if (!mappingSheet) throw new Error('Missing OrderCoilMapping');
+                        orderMapping = XLSX.utils.sheet_to_json(mappingSheet, { defval: '' });
+
+                        const slitSheet = wb.Sheets['SlitSequence'];
+                        if (!slitSheet) throw new Error('Missing SlitSequence');
+                        slitSeq = XLSX.utils.sheet_to_json(slitSheet, { defval: '' });
+
+                        fileStatus.innerText = `✅ loaded (${orderMapping.length} mapping, ${slitSeq.length} slit)`;
+
+                        // Preprocess: build slit map keyed by batch|partition
+                        const slitMap = new Map();
+                        slitSeq.forEach(s => {
+                            if (!s.COIL_NUMBER || s.PARTING_INDEX === undefined) return;
+                            const key = `${s.COIL_NUMBER}|${s.PARTING_INDEX}`;
+                            if (!slitMap.has(key)) slitMap.set(key, []);
+                            slitMap.get(key).push(s);
+                        });
+
+                        // Group rows by batch, sort by partition, compute partition weight
+                        const batchGroups = {};
+                        orderMapping.forEach(row => {
+                            const batch = row.BATCH_NUMBER;
+                            if (!batchGroups[batch]) batchGroups[batch] = [];
+                            batchGroups[batch].push(row);
+                        });
+                        Object.keys(batchGroups).forEach(batch => {
+                            const rows = batchGroups[batch].sort((a,b) => (a.NO_OF_PARTITION||0) - (b.NO_OF_PARTITION||0));
+                            let prevCum = 0;
+                            rows.forEach((row, idx) => {
+                                const cum = parseFloat(row.PARTING_WEIGHT) || 0;
+                                const partWeight = cum - prevCum;
+                                row._partWeight = partWeight;
+                                prevCum = cum;
+                            });
+                        });
+
+                        // Compute scrap per row
+                        orderMapping.forEach(row => {
+                            const batch = row.BATCH_NUMBER;
+                            const partIdx = row.NO_OF_PARTITION;
+                            const key = `${batch}|${partIdx}`;
+                            const slits = slitMap.get(key) || [];
+                            const stockWidth = parseFloat(row.STOCK_WIDTH) || 1;
+                            const partWeight = row._partWeight || 0;
+                            let scrapWidthSum = 0;
+                            slits.forEach(slit => {
+                                if (slit.ORDER_NUMBER == -1) scrapWidthSum += parseFloat(slit.WIDTH) || 0;
+                            });
+                            const scrapWeight = (stockWidth > 0) ? (scrapWidthSum / stockWidth) * partWeight : 0;
+                            row._scrapWeight = scrapWeight;
+                        });
+
+                        buildMotherList();
+                        buildOrderAggregates();
+                        buildGroupSummary();
+
+                        showMessage('File ready. Use tabs above.', 'success');
+                    } catch (err) {
+                        fileStatus.innerText = '❌ error';
+                        showMessage(err.message, 'danger');
+                        console.error(err);
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            }
+
+            // build mother list (coil view)
+            function buildMotherList() {
+                motherSet.clear();
+                orderMapping.forEach(r => { if (r.BATCH_NUMBER) motherSet.add(r.BATCH_NUMBER); });
+                const sorted = [...motherSet].sort();
+                motherListDiv.innerHTML = sorted.map(b => `<div class="mother-item" data-batch="${b}">${b}</div>`).join('');
+                motherCountSpan.innerText = `${sorted.length} coils`;
+                mainTabs.style.display = 'flex';
+                mainTabContent.style.display = 'block';
+
+                document.querySelectorAll('.mother-item').forEach(el => {
+                    el.addEventListener('click', (e) => {
+                        document.querySelectorAll('.mother-item').forEach(x => x.classList.remove('active'));
+                        el.classList.add('active');
+                        loadMotherData(el.dataset.batch);
+                    });
+                });
+                if (sorted.length) {
+                    document.querySelector('.mother-item')?.click();
+                }
+            }
+
+            // build global order aggregates (order view)
+            function buildOrderAggregates() {
+                ordersAggregated.clear();
+                orderMapping.forEach(row => {
+                    if (!row.ORDER_NUMBER || row.ORDER_NUMBER == -1) return;
+                    const key = `${row.ORDER_NUMBER}|${row.ORDER_LINE_NUMBER}`;
+                    if (!ordersAggregated.has(key)) {
+                        ordersAggregated.set(key, {
+                            order: row.ORDER_NUMBER,
+                            line: row.ORDER_LINE_NUMBER,
+                            width: parseFloat(row.ORDER_WIDTH) || 0,
+                            thickness: parseFloat(row.THICKNESS) || 0,
+                            grade: row.GRADE || '',
+                            orderedQty: parseFloat(row.ORDER_QTY) || 0,
+                            totalAllocated: 0,
+                            mothers: []
+                        });
+                    }
+                    const o = ordersAggregated.get(key);
+                    const alloc = parseFloat(row.ALLOCATED_ORDER_QTY) || 0;
+                    o.totalAllocated += alloc;
+                    o.mothers.push({
+                        mother: row.BATCH_NUMBER,
+                        child: row.CHILD_BATCH_NUMBER,
+                        allocated: alloc,
+                        partition: row.NO_OF_PARTITION,
+                        motherGrade: row.GRADE,
+                        motherThick: parseFloat(row.THICKNESS) || 0,
+                        stockWidth: parseFloat(row.STOCK_WIDTH) || 0
+                    });
+                });
+
+                const sortedOrders = Array.from(ordersAggregated.values()).sort((a,b) => String(a.order).localeCompare(String(b.order)));
+                let html = '';
+                sortedOrders.forEach(o => {
+                    const yieldPctOrder = o.orderedQty > 0 ? (o.totalAllocated / o.orderedQty * 100) : 0;
+                    html += `<div class="order-summary-row" data-key="${o.order}|${o.line}">
+                        <div class="d-flex justify-content-between">
+                            <span><strong>${o.order}</strong> / L${o.line}</span>
+                            <span class="badge bg-secondary">${fmt(o.width)}mm</span>
+                        </div>
+                        <div class="small d-flex justify-content-between">
+                            <span>${o.grade} / ${fmt(o.thickness)}mm</span>
+                            <span>alloc ${fmt(o.totalAllocated)}kg / ${fmt(o.orderedQty)}kg</span>
+                        </div>
+                        <div class="yield-bar mt-1">
+                            <div class="yield-fill" style="width: ${Math.min(100, yieldPctOrder)}%;"></div>
+                        </div>
+                    </div>`;
+                });
+                orderListContainer.innerHTML = html;
+                orderCountSpan.innerText = `${sortedOrders.length} orders`;
+
+                document.querySelectorAll('#orderListContainer .order-summary-row').forEach(el => {
+                    el.addEventListener('click', (e) => {
+                        document.querySelectorAll('#orderListContainer .order-summary-row').forEach(x => x.classList.remove('active'));
+                        el.classList.add('active');
+                        const key = el.dataset.key;
+                        const [order, line] = key.split('|');
+                        displayOrderDetail(order, line);
+                    });
+                });
+            }
+
+            function displayOrderDetail(order, line) {
+                const key = `${order}|${line}`;
+                const ord = ordersAggregated.get(key);
+                if (!ord) return;
+                selectedOrderTitle.innerText = `Order ${order} / Line ${line}`;
+                let mothersHtml = '';
+                ord.mothers.forEach(m => {
+                    mothersHtml += `<tr>
+                        <td>${m.mother}</td>
+                        <td>${m.motherGrade || ''}</td>
+                        <td>${fmt(m.motherThick)} mm</td>
+                        <td>${fmt(m.stockWidth)} mm</td>
+                        <td>${m.child || '—'}</td>
+                        <td>P${m.partition}</td>
+                        <td>${fmt(m.allocated)} kg</td>
+                    </tr>`;
+                });
+                const yieldVal = ord.orderedQty > 0 ? (ord.totalAllocated / ord.orderedQty * 100) : 0;
+                orderDetailContainer.innerHTML = `
+                    <div class="card bg-light p-3">
+                        <div class="row">
+                            <div class="col-md-4"><strong>Grade:</strong> ${ord.grade || '—'}</div>
+                            <div class="col-md-4"><strong>Thickness:</strong> ${fmt(ord.thickness)} mm</div>
+                            <div class="col-md-4"><strong>Width required:</strong> ${fmt(ord.width)} mm</div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-6">Ordered: ${fmt(ord.orderedQty)} kg</div>
+                            <div class="col-6">Allocated: ${fmt(ord.totalAllocated)} kg</div>
+                        </div>
+                        <div class="row mt-2">
+                            <div class="col-12">
+                                <div class="yield-bar">
+                                    <div class="yield-fill" style="width: ${Math.min(100, yieldVal)}%;"></div>
+                                </div>
+                                <small>Yield ${fmt(yieldVal,1)}%</small>
+                            </div>
+                        </div>
+                        <hr>
+                        <h6>Contributing mother coils</h6>
+                        <div style="max-height: 300px; overflow-y: auto;">
+                            <table class="table table-sm table-bordered small-table">
+                                <thead><tr><th>Mother</th><th>Grade</th><th>Thick</th><th>Stock width</th><th>Child</th><th>Part</th><th>Allocated</th></tr></thead>
+                                <tbody>${mothersHtml}</tbody>
+                            </table>
+                        </div>
+                    </div>
+                `;
+            }
+
+            // GROUP SUMMARY with charts
+            function buildGroupSummary() {
+                const groups = new Map(); // key: GROUP_ID
+                orderMapping.forEach(row => {
+                    const gid = row.GROUP_ID;
+                    if (gid === undefined || gid === null) return;
+                    if (!groups.has(gid)) {
+                        groups.set(gid, {
+                            groupId: gid,
+                            orders: new Set(),
+                            motherCoils: new Set(),
+                            totalAllocated: 0,
+                            totalScrap: 0,
+                            orderGrades: new Set(),
+                            orderThicknesses: new Set(),
+                            orderWidths: new Set(),
+                            motherGrades: new Set(),
+                            motherThicknesses: new Set(),
+                            motherWidths: new Set()
+                        });
+                    }
+                    const g = groups.get(gid);
+                    // order info
+                    if (row.ORDER_NUMBER && row.ORDER_NUMBER != -1) {
+                        g.orders.add(`${row.ORDER_NUMBER}|${row.ORDER_LINE_NUMBER}`);
+                        if (row.GRADE) g.orderGrades.add(row.GRADE);
+                        if (row.THICKNESS) g.orderThicknesses.add(parseFloat(row.THICKNESS));
+                        if (row.ORDER_WIDTH) g.orderWidths.add(parseFloat(row.ORDER_WIDTH));
+                    }
+                    // mother info
+                    if (row.BATCH_NUMBER) {
+                        g.motherCoils.add(row.BATCH_NUMBER);
+                        if (row.GRADE) g.motherGrades.add(row.GRADE);
+                        if (row.THICKNESS) g.motherThicknesses.add(parseFloat(row.THICKNESS));
+                        if (row.STOCK_WIDTH) g.motherWidths.add(parseFloat(row.STOCK_WIDTH));
+                    }
+                    // allocated & scrap
+                    g.totalAllocated += parseFloat(row.ALLOCATED_ORDER_QTY) || 0;
+                    g.totalScrap += row._scrapWeight || 0;
+                });
+
+                let html = '';
+                const sortedGroups = Array.from(groups.values()).sort((a,b) => String(a.groupId).localeCompare(String(b.groupId)));
+                const groupLabels = [];
+                const allocData = [];
+                const yieldData = [];
+
+                sortedGroups.forEach(g => {
+                    const orderList = Array.from(g.orders).join(', ');
+                    const motherList = Array.from(g.motherCoils).join(', ');
+                    const yieldVal = (g.totalAllocated + g.totalScrap) > 0 ? (g.totalAllocated / (g.totalAllocated + g.totalScrap) * 100) : 0;
+
+                    html += `<tr>
+                        <td>${g.groupId}</td>
+                        <td>${orderList}</td>
+                        <td>${motherList}</td>
+                        <td>${fmt(g.totalAllocated)}</td>
+                        <td>${fmt(g.totalScrap)}</td>
+                        <td>${fmt(yieldVal,1)}%</td>
+                        <td>${Array.from(g.orderGrades).join(', ')}</td>
+                        <td>${Array.from(g.orderThicknesses).map(fmt).join(', ')}</td>
+                        <td>${Array.from(g.orderWidths).map(fmt).join(', ')}</td>
+                        <td>${Array.from(g.motherGrades).join(', ')}</td>
+                        <td>${Array.from(g.motherThicknesses).map(fmt).join(', ')}</td>
+                        <td>${Array.from(g.motherWidths).map(fmt).join(', ')}</td>
+                    </tr>`;
+
+                    groupLabels.push(g.groupId);
+                    allocData.push(g.totalAllocated);
+                    yieldData.push(yieldVal);
+                });
+                groupSummaryBody.innerHTML = html;
+
+                // Create charts
+                if (allocChartInst) allocChartInst.destroy();
+                if (yieldChartInst) yieldChartInst.destroy();
+
+                if (groupLabels.length > 0) {
+                    allocChartInst = new Chart(allocCanvas, {
+                        type: 'bar',
+                        data: {
+                            labels: groupLabels,
+                            datasets: [{
+                                label: 'Allocated weight (kg)',
+                                data: allocData,
+                                backgroundColor: 'rgba(13, 110, 253, 0.7)',
+                                borderColor: '#0d6efd',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } }
+                        }
+                    });
+
+                    yieldChartInst = new Chart(yieldCanvas, {
+                        type: 'bar',
+                        data: {
+                            labels: groupLabels,
+                            datasets: [{
+                                label: 'Yield %',
+                                data: yieldData,
+                                backgroundColor: 'rgba(25, 135, 84, 0.7)',
+                                borderColor: '#198754',
+                                borderWidth: 1
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: { legend: { display: false } },
+                            scales: { y: { max: 100, beginAtZero: true } }
+                        }
+                    });
+                }
+            }
+
+            // coil view load mother data (unchanged from earlier version)
+            function loadMotherData(batch) {
+                currentMother = batch;
+                const mapRows = orderMapping.filter(r => r.BATCH_NUMBER == batch).sort((a,b) => (a.NO_OF_PARTITION||0) - (b.NO_OF_PARTITION||0));
+                if (mapRows.length===0) return;
+
+                const first = mapRows[0];
+                const stockWeight = parseFloat(first.STOCK_WEIGHT) || 0;
+                const stockWidth = parseFloat(first.STOCK_WIDTH) || 1000;
+                const stockLength = parseFloat(first.STOCK_LENGTH) || 2000;
+
+                motherSummary.innerHTML = `<span class="fw-bold">${batch}</span>  |  ${first.GRADE || ''} / ${fmt(first.THICKNESS)}mm  |  ${fmt(stockWidth)}mm × ${fmt(stockLength)}mm  |  ${fmt(stockWeight)}kg`;
+
+                let partitions = [];
+                mapRows.forEach(r => {
+                    partitions.push({
+                        idx: r.NO_OF_PARTITION,
+                        child: r.CHILD_BATCH_NUMBER,
+                        order: r.ORDER_NUMBER,
+                        line: r.ORDER_LINE_NUMBER,
+                        widthOrder: parseFloat(r.ORDER_WIDTH) || 0,
+                        numStrips: parseInt(r.NUMBER_ORDER_WIDTH) || 0,
+                        partLength: parseFloat(r.PARTING_LENGTH) - (partitions.length>0 ? parseFloat(mapRows[partitions.length-1].PARTING_LENGTH) : 0),
+                        partWeight: r._partWeight || 0,
+                        allocated: parseFloat(r.ALLOCATED_ORDER_QTY) || 0,
+                        orderQty: parseFloat(r.ORDER_QTY) || 0,
+                        scrapWeight: r._scrapWeight || 0
+                    });
+                });
+
+                const slitRows = slitSeq.filter(s => s.COIL_NUMBER == batch);
+                const slitGroups = {};
+                slitRows.forEach(s => {
+                    let idx = s.PARTING_INDEX;
+                    if (!slitGroups[idx]) slitGroups[idx] = [];
+                    slitGroups[idx].push(s);
+                });
+
+                // order summary for this coil
+                const orderMap = new Map();
+                partitions.forEach(p => {
+                    if (p.order && p.order != -1) {
+                        const key = `${p.order}|${p.line}`;
+                        if (!orderMap.has(key)) {
+                            orderMap.set(key, {
+                                order: p.order,
+                                line: p.line,
+                                width: p.widthOrder,
+                                orderedQty: p.orderQty,
+                                allocated: 0,
+                                childCount: 0
+                            });
+                        }
+                        const o = orderMap.get(key);
+                        o.allocated += p.allocated;
+                        o.childCount++;
+                    }
+                });
+
+                let totalAllocOrders = 0;
+                let orderRowsHtml = '';
+                for (let [_, o] of orderMap.entries()) {
+                    const yieldPctOrder = o.orderedQty > 0 ? (o.allocated / o.orderedQty * 100) : 0;
+                    totalAllocOrders += o.allocated;
+                    orderRowsHtml += `
+                        <div class="order-summary-row small" style="cursor:default; background:#f8f9fa;">
+                            <div class="row g-1 align-items-center">
+                                <div class="col-5"><strong>${o.order}</strong> / L${o.line}</div>
+                                <div class="col-3">${fmt(o.width)}mm</div>
+                                <div class="col-2 text-end">${fmt(o.allocated)}kg</div>
+                                <div class="col-2 text-end">${o.childCount}</div>
+                            </div>
+                            <div class="row g-1">
+                                <div class="col-6">order: ${fmt(o.orderedQty)} kg</div>
+                                <div class="col-6">
+                                    <div class="yield-bar">
+                                        <div class="yield-fill" style="width: ${Math.min(100, yieldPctOrder)}%;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+                orderSummaryContainer.innerHTML = orderRowsHtml || '<div class="text-muted">No order allocations</div>';
+                totalAllocatedOrders.innerText = fmt(totalAllocOrders) + ' kg';
+
+                // child grid
+                let gridHtml = '';
+                let totalScrapWeight = 0;
+                partitions.forEach(p => {
+                    const slits = slitGroups[p.idx] || [];
+                    let scrapWidth = 0;
+                    slits.forEach(slit => { if (slit.ORDER_NUMBER == -1) scrapWidth += parseFloat(slit.WIDTH) || 0; });
+                    const scrapPartWeight = p.scrapWeight;
+                    totalScrapWeight += scrapPartWeight;
+
+                    let barHtml = '<div class="slit-minibar">';
+                    slits.sort((a,b)=> (parseFloat(a.WIDTH)||0) - (parseFloat(b.WIDTH)||0));
+                    slits.forEach(slit => {
+                        let w = parseFloat(slit.WIDTH) || 0;
+                        let widthPct = stockWidth>0 ? (w/stockWidth)*100 : 0;
+                        let colorClass = (slit.ORDER_NUMBER == -1) ? 'slit-segment-scrap' : 'slit-segment-good';
+                        barHtml += `<div class="${colorClass}" style="width:${widthPct}%;" title="order ${slit.ORDER_NUMBER}"></div>`;
+                    });
+                    barHtml += '</div>';
+
+                    gridHtml += `<div class="partition-row">
+                        <div class="row g-2 align-items-center">
+                            <div class="col-2"><span class="badge bg-dark">P${p.idx}</span></div>
+                            <div class="col-3 text-truncate" title="${p.child || ''}">${p.child || '—'}</div>
+                            <div class="col-2">${p.order ?? ''}</div>
+                            <div class="col-2">${fmt(p.widthOrder)}mm</div>
+                            <div class="col-3"><span class="fw-semibold">${fmt(p.allocated)} kg</span></div>
+                        </div>
+                        <div class="row mt-1">
+                            <div class="col-12">${barHtml}</div>
+                        </div>
+                        <div class="row small text-muted">
+                            <div class="col-6">len ${fmt(p.partLength)} mm</div>
+                            <div class="col-6">est.scrap ${fmt(scrapPartWeight)} kg</div>
+                        </div>
+                    </div>`;
+                });
+
+                childAllocationGrid.innerHTML = gridHtml;
+                childCountSpan.innerText = partitions.length;
+
+                const totalAlloc = partitions.reduce((acc, p) => acc + p.allocated, 0);
+                const yieldPctVal = stockWeight>0 ? (totalAlloc/stockWeight)*100 : 0;
+                yieldPct.innerText = fmt(yieldPctVal,1) + '%';
+                scrapEst.innerText = fmt(totalScrapWeight) + ' kg';
+                stockDim.innerText = `stock: ${fmt(stockWidth)}mm × ${fmt(stockLength)}mm`;
+
+                drawSvg(stockWidth, stockLength, partitions, slitGroups);
+            }
+
+            function drawSvg(stockWidth, stockLength, partitions, slitGroups) {
+                const svg = coilSvg;
+                const svgNS = "http://www.w3.org/2000/svg";
+                svg.innerHTML = '';
+
+                const scale = 380 / stockWidth;
+                const viewWidth = 500, viewHeight = Math.min(400, stockLength * scale + 30);
+                svg.setAttribute('viewBox', `0 0 ${viewWidth} ${viewHeight}`);
+
+                const rect = document.createElementNS(svgNS, 'rect');
+                rect.setAttribute('x', '20');
+                rect.setAttribute('y', '20');
+                rect.setAttribute('width', stockWidth * scale);
+                rect.setAttribute('height', stockLength * scale);
+                rect.setAttribute('fill', '#f8f9fa');
+                rect.setAttribute('stroke', '#333');
+                rect.setAttribute('stroke-width', '1.5');
+                svg.appendChild(rect);
+
+                let yOffset = 20;
+                partitions.forEach(p => {
+                    const partHeight = p.partLength * scale;
+                    const slits = slitGroups[p.idx] || [];
+                    let xOffset = 20;
+                    slits.forEach(slit => {
+                        const w = parseFloat(slit.WIDTH) || 0;
+                        const slitWidth = w * scale;
+                        const isScrap = (slit.ORDER_NUMBER == -1);
+                        const r = document.createElementNS(svgNS, 'rect');
+                        r.setAttribute('x', xOffset);
+                        r.setAttribute('y', yOffset);
+                        r.setAttribute('width', slitWidth);
+                        r.setAttribute('height', partHeight);
+                        r.setAttribute('fill', isScrap ? '#f8d7da' : '#cfe2ff');
+                        r.setAttribute('stroke', isScrap ? '#b02a37' : '#0d6efd');
+                        r.setAttribute('stroke-width', '0.5');
+                        svg.appendChild(r);
+                        if (slitWidth > 20) {
+                            let txt = document.createElementNS(svgNS, 'text');
+                            txt.setAttribute('x', xOffset + slitWidth/2);
+                            txt.setAttribute('y', yOffset + partHeight/2);
+                            txt.setAttribute('text-anchor', 'middle');
+                            txt.setAttribute('dominant-baseline', 'middle');
+                            txt.setAttribute('font-size', '8');
+                            txt.textContent = fmt(w,0);
+                            svg.appendChild(txt);
+                        }
+                        xOffset += slitWidth;
+                    });
+                    let line = document.createElementNS(svgNS, 'line');
+                    line.setAttribute('x1', '20');
+                    line.setAttribute('y1', yOffset + partHeight);
+                    line.setAttribute('x2', 20 + stockWidth * scale);
+                    line.setAttribute('y2', yOffset + partHeight);
+                    line.setAttribute('stroke', '#888');
+                    line.setAttribute('stroke-dasharray', '3 3');
+                    svg.appendChild(line);
+                    yOffset += partHeight;
+                });
+            }
+
+            fileInput.addEventListener('change', (e) => {
+                const f = e.target.files[0];
+                if (f) handleFile(f); else clearAll();
+            });
+
+            clearAll();
+        })();
+    </script>
+</body>
+</html>
